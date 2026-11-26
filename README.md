@@ -17,5 +17,5 @@ docker compose -p kafka-log-demo -f compose.yaml -f compose.grafana.yaml up -d
 Для проверки топиков: `docker compose -p kafka-log-demo -f compose.yaml -f compose.grafana.yaml exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list`.
 
 
-В Kubernetes Vector запускается DaemonSet только на выделенных нодах. Источник `kubernetes_logs` ограничивается вашим namespace; метрики ноды и контейнеров собираются внутри кластера и идут в отдельный топик Kafka. Формат и разрешения доступа к kubelet/cAdvisor для метрик подов надо проверить в конкретном кластере. Внешний Prometheus scrape не предполагается.
+В Kubernetes чарт `helm/telemetry-kafka` разворачивает только Vector. По умолчанию DaemonSet работает на всех разрешённых обычных нодах, собирает логи всех подов и метрики нод и контейнеров, затем отправляет их во внешнюю Kafka. Адрес брокера с портом и топики задаются в `values.yaml`. Loki, Mimir, Alloy и Grafana в Kubernetes этим чартом не устанавливаются. Формат и разрешения доступа к kubelet/cAdvisor для метрик подов надо проверить в конкретном кластере.
 

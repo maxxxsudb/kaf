@@ -1,14 +1,13 @@
-# Telemetry → Kafka для Kubernetes
+# Сбор телеметрии Kubernetes в Kafka
 
-Chart ставит один Vector DaemonSet на ноды, выбранные `nodeSelector`. Внешние Loki, Mimir и Grafana здесь не разворачиваются.
+Чарт разворачивает Vector DaemonSet. Он собирает stdout/stderr всех подов с каждой ноды, журналы служб ноды, метрики хоста и kubelet/cAdvisor, затем отправляет данные во внешнюю Kafka. Kafka, Loki, Mimir, Alloy и Grafana чарт не устанавливает. Внешние Helm-зависимости и архивы субчартов ему не нужны.
 
-Перед установкой заполните `values.yaml` или сделайте копию `values-example.yaml`:
+Скопируйте `values-example.yaml` и задайте:
 
-- `cluster`, `targetNamespace`, `applicationAnnotation` — метаданные событий;
-- `nodeSelector` — метка только выделенных нод;
-- `kafka.brokers` и `kafka.topics.*` — адрес брокеров и заранее созданные топики;
-- `nodeLogs.units` — нужные systemd-службы;
-- `podMetrics.caSecretName` — CA сертификат kubelet, если он не подписан CA service account.
+- `cluster` — имя кластера в событиях;
+- `kafka.brokers` — адрес Kafka в формате `host:port` или список `host1:port1,host2:port2`;
+- `kafka.topics.podLogs`, `nodeLogs`, `metrics` — существующие топики для логов подов, журналов нод и метрик;
+- `nodeSelector` — метки нужных нод. По умолчанию `{}`: DaemonSet запускается на всех нодах, допускающих обычные pod. Для tainted-нод настройте `tolerations`.
 
 ```sh
 helm upgrade --install telemetry ./helm/telemetry-kafka \
@@ -16,15 +15,13 @@ helm upgrade --install telemetry ./helm/telemetry-kafka \
   -f ./helm/telemetry-kafka/values-example.yaml
 ```
 
-Vector читает stdout/stderr подов только из `targetNamespace`, обогащает записи `cluster`, `namespace`, `pod`, `node`, `application` и пишет JSON в `podLogs`. `application` берётся из аннотации `applicationAnnotation`, затем из pod label `app.kubernetes.io/name`, затем из имени контейнера. Логи служб ноды идут отдельно в `nodeLogs` с `cluster` и `node`; namespace у ноды нет.
+Логи подов содержат `cluster`, `namespace`, `pod`, `node`, `application`. `application` берётся из аннотации `applicationAnnotation`, затем из метки `app.kubernetes.io/name`, затем из имени контейнера. Журналы нод идут в отдельный топик. Метрики отправляются в формате OTLP protobuf; для pod сохраняются метки `namespace`, `pod`, `container`, когда их предоставляет cAdvisor.
 
-Метрики ноды и kubelet `/metrics/cadvisor` отправляются в `metrics` в формате OTLP protobuf. Для метрик pod остаются `namespace`, `pod`, `container` из cAdvisor; chart отбрасывает метрики других namespace. `cluster` и `node` добавляются как теги. Аннотации pod в cAdvisor не поступают, поэтому `application` для метрик можно добавить только отдельным сопоставлением по данным Kubernetes API. Alloy за пределами кластера должен читать топик метрик через `otelcol.receiver.kafka` с `otlp_proto`, а топики логов — через `loki.source.kafka`.
+Vector читает `/var/log/pods`, `/proc`, `/sys` и journald на каждой ноде. Позиции чтения и дисковые буферы сохраняются в `/var/lib/<release>-vector`. Если журнал доступен только в `/run/log/journal`, задайте `nodeLogs.journalDirectory: /run/log/journal`.
 
-DaemonSet имеет права `get/list/watch` на pod, namespace и node для обогащения логов, а также `get nodes/metrics` для kubelet. Ему нужны локальные чтения `/var/log/pods`, `/proc`, `/sys` и journald. Debian-вариант Vector используется потому, что в нём есть `journalctl`. Позиции чтения и дисковые буферы сохраняются в `/var/lib/<release>-vector` на каждой ноде.
+Для kubelet `/metrics/cadvisor` требуется доступ к `status.hostIP:10250` и доверенный TLS-сертификат. При необходимости задайте `podMetrics.caSecretName`. Для защищённой Kafka доступны `kafka.tls.caSecretName` и `kafka.sasl.passwordSecretName`; секреты должны существовать в namespace релиза.
 
-Если на ноде журнал находится только в `/run/log/journal`, установите `nodeLogs.journalDirectory: /run/log/journal`. Kubelet должен быть доступен на `status.hostIP:10250`, а его сертификат должен проходить проверку TLS. Токен service account перечитывается Vector каждый час. При защищённой Kafka укажите `kafka.tls.caSecretName` и/или `kafka.sasl.passwordSecretName`; секреты должны существовать в namespace релиза.
-
-Проверка шаблонов без кластера:
+Проверка без кластера:
 
 ```sh
 helm lint ./helm/telemetry-kafka -f ./helm/telemetry-kafka/values-example.yaml

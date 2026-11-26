@@ -1,5 +1,4 @@
 cluster: ""
-targetNamespace: ""
 applicationAnnotation: app.kubernetes.io/name
 
 image:

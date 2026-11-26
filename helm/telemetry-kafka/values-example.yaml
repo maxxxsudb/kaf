@@ -1,11 +1,9 @@
 cluster: prod-cluster
-targetNamespace: my-app
 applicationAnnotation: app.kubernetes.io/name
-nodeSelector:
-  observability.mycompany.io/assigned: "true"
+nodeSelector: {}
 kafka:
   brokers: kafka.internal:9092
   topics:
-    podLogs: my-app-pod-logs
-    nodeLogs: my-app-node-logs
-    metrics: my-app-metrics-otlp
+    podLogs: cluster-pod-logs
+    nodeLogs: cluster-node-logs
+    metrics: cluster-metrics-otlp

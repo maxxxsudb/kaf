@@ -1,8 +1,5 @@
-{{- if or (not .Values.cluster) (not .Values.targetNamespace) (not .Values.kafka.brokers) (not .Values.kafka.topics.podLogs) (and .Values.nodeLogs.enabled (not .Values.kafka.topics.nodeLogs)) (and (or .Values.hostMetrics.enabled .Values.podMetrics.enabled) (not .Values.kafka.topics.metrics)) -}}
-{{- fail "Set cluster, targetNamespace, kafka.brokers, and enabled kafka.topics in values" -}}
-{{- end -}}
-{{- if eq (len .Values.nodeSelector) 0 -}}
-{{- fail "Set nodeSelector to restrict collection to the assigned nodes" -}}
+{{- if or (not .Values.cluster) (not .Values.kafka.brokers) (not .Values.kafka.topics.podLogs) (and .Values.nodeLogs.enabled (not .Values.kafka.topics.nodeLogs)) (and (or .Values.hostMetrics.enabled .Values.podMetrics.enabled) (not .Values.kafka.topics.metrics)) -}}
+{{- fail "Set cluster, kafka.brokers, and enabled kafka.topics in values" -}}
 {{- end -}}
 apiVersion: v1
 kind: ConfigMap
@@ -23,8 +20,6 @@ data:
       pod_logs:
         type: kubernetes_logs
         self_node_name: ${VECTOR_SELF_NODE_NAME}
-        include_paths_glob_patterns:
-          - {{ printf "/var/log/pods/%s_*/*/*.log" .Values.targetNamespace | quote }}
       {{- if .Values.nodeLogs.enabled }}
       node_journal:
         type: journald
@@ -53,13 +48,9 @@ data:
           verify_hostname: {{ .Values.podMetrics.verifyHostname }}
       {{- end }}
     transforms:
-      namespace_pod_logs:
-        type: filter
-        inputs: [pod_logs]
-        condition: '.kubernetes.pod_namespace == {{ .Values.targetNamespace | quote }}'
       enrich_pod_logs:
         type: remap
-        inputs: [namespace_pod_logs]
+        inputs: [pod_logs]
         source: |-
           .cluster = {{ .Values.cluster | quote }}
           .namespace = .kubernetes.pod_namespace
@@ -85,13 +76,9 @@ data:
           .tags.host = get_env_var!("VECTOR_SELF_NODE_NAME")
       {{- end }}
       {{- if .Values.podMetrics.enabled }}
-      namespace_pod_metrics:
-        type: filter
-        inputs: [pod_metrics]
-        condition: '.tags.namespace == {{ .Values.targetNamespace | quote }} && exists(.tags.pod)'
       enrich_pod_metrics:
         type: remap
-        inputs: [namespace_pod_metrics]
+        inputs: [pod_metrics]
         source: |-
           .tags.cluster = {{ .Values.cluster | quote }}
           .tags.node = get_env_var!("VECTOR_SELF_NODE_NAME")
