@@ -27,4 +27,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "telemetry-kafka.name" . }}
-    namespace: {{ .Release.Namespace }}
+    namespace: {{ include "telemetry-kafka.namespace" . | quote }}

@@ -5,6 +5,7 @@
 Скопируйте `values-example.yaml` и задайте:
 
 - `cluster` — имя кластера в событиях;
+- `deploymentNamespace` — namespace подов Vector и его объектов. Если пусто, используется namespace Helm-релиза. Указанный namespace должен уже существовать;
 - `targetNamespace` — namespace для логов и метрик подов. Пустое значение собирает данные со всех namespace и нод. При заданном namespace журналы и метрики самих нод не отправляются;
 - `kafka.brokers` — адрес Kafka в формате `host:port` или список `host1:port1,host2:port2`;
 - `kafka.topics.podLogs`, `nodeLogs`, `metrics` — существующие топики для логов подов, журналов нод и метрик;
@@ -20,7 +21,7 @@ helm upgrade --install telemetry ./helm/telemetry-kafka \
 
 Vector читает `/var/log/pods`, `/proc`, `/sys` и journald на каждой ноде. Позиции чтения и дисковые буферы сохраняются в `/var/lib/<release>-vector`. Если журнал доступен только в `/run/log/journal`, задайте `nodeLogs.journalDirectory: /run/log/journal`.
 
-Для kubelet `/metrics/cadvisor` требуется доступ к `status.hostIP:10250` и доверенный TLS-сертификат. При необходимости задайте `podMetrics.caSecretName`. Для защищённой Kafka доступны `kafka.tls.caSecretName` и `kafka.sasl.passwordSecretName`; секреты должны существовать в namespace релиза.
+Для kubelet `/metrics/cadvisor` требуется доступ к `status.hostIP:10250` и доверенный TLS-сертификат. При необходимости задайте `podMetrics.caSecretName`. Для защищённой Kafka доступны `kafka.tls.caSecretName` и `kafka.sasl.passwordSecretName`; секреты должны существовать в `deploymentNamespace`.
 
 Проверка без кластера:
 

@@ -1,4 +1,5 @@
 cluster: ""
+deploymentNamespace: ""
 targetNamespace: ""
 applicationAnnotation: app.kubernetes.io/name
 

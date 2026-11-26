@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: {{ include "telemetry-kafka.name" . }}
+  namespace: {{ include "telemetry-kafka.namespace" . | quote }}
   labels:
     {{- include "telemetry-kafka.labels" . | nindent 4 }}
 spec:

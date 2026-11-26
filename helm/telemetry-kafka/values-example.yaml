@@ -1,4 +1,5 @@
 cluster: prod-cluster
+deploymentNamespace: monitoring
 targetNamespace: ""
 applicationAnnotation: app.kubernetes.io/name
 nodeSelector: {}
