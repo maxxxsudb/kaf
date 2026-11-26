@@ -1,0 +1,158 @@
+{{- if or (not .Values.cluster) (not .Values.targetNamespace) (not .Values.kafka.brokers) (not .Values.kafka.topics.podLogs) (and .Values.nodeLogs.enabled (not .Values.kafka.topics.nodeLogs)) (and (or .Values.hostMetrics.enabled .Values.podMetrics.enabled) (not .Values.kafka.topics.metrics)) -}}
+{{- fail "Set cluster, targetNamespace, kafka.brokers, and enabled kafka.topics in values" -}}
+{{- end -}}
+{{- if eq (len .Values.nodeSelector) 0 -}}
+{{- fail "Set nodeSelector to restrict collection to the assigned nodes" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "telemetry-kafka.name" . }}
+  labels:
+    {{- include "telemetry-kafka.labels" . | nindent 4 }}
+data:
+  vector.yaml: |
+    data_dir: /var/lib/vector
+    {{- if .Values.podMetrics.enabled }}
+    secret:
+      kubelet_token:
+        type: directory
+        path: /var/run/secrets/kubernetes.io/serviceaccount
+    {{- end }}
+    sources:
+      pod_logs:
+        type: kubernetes_logs
+        self_node_name: ${VECTOR_SELF_NODE_NAME}
+        include_paths_glob_patterns:
+          - {{ printf "/var/log/pods/%s_*/*/*.log" .Values.targetNamespace | quote }}
+      {{- if .Values.nodeLogs.enabled }}
+      node_journal:
+        type: journald
+        journal_directory: {{ .Values.nodeLogs.journalDirectory | quote }}
+        include_units: {{ .Values.nodeLogs.units | toJson }}
+      {{- end }}
+      {{- if .Values.hostMetrics.enabled }}
+      host_metrics:
+        type: host_metrics
+        namespace: node
+        scrape_interval_secs: {{ .Values.hostMetrics.intervalSeconds }}
+        collectors: [cpu, memory, load, disk, filesystem, network]
+      {{- end }}
+      {{- if .Values.podMetrics.enabled }}
+      pod_metrics:
+        type: prometheus_scrape
+        endpoints:
+          - "https://${VECTOR_SELF_NODE_IP}:{{ .Values.podMetrics.kubeletPort }}/metrics/cadvisor"
+        scrape_interval_secs: {{ .Values.podMetrics.intervalSeconds }}
+        auth:
+          strategy: bearer
+          token: SECRET[kubelet_token.token]
+        tls:
+          ca_file: {{ ternary "/etc/vector/kubelet-ca/ca.crt" "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt" (ne .Values.podMetrics.caSecretName "") | quote }}
+          verify_certificate: {{ .Values.podMetrics.verifyCertificate }}
+          verify_hostname: {{ .Values.podMetrics.verifyHostname }}
+      {{- end }}
+    transforms:
+      namespace_pod_logs:
+        type: filter
+        inputs: [pod_logs]
+        condition: '.kubernetes.pod_namespace == {{ .Values.targetNamespace | quote }}'
+      enrich_pod_logs:
+        type: remap
+        inputs: [namespace_pod_logs]
+        source: |-
+          .cluster = {{ .Values.cluster | quote }}
+          .namespace = .kubernetes.pod_namespace
+          .pod = .kubernetes.pod_name
+          .node = .kubernetes.pod_node_name
+          .application = get(.kubernetes.pod_annotations, [{{ .Values.applicationAnnotation | quote }}]) ?? get(.kubernetes.pod_labels, ["app.kubernetes.io/name"]) ?? .kubernetes.container_name
+      {{- if .Values.nodeLogs.enabled }}
+      enrich_node_logs:
+        type: remap
+        inputs: [node_journal]
+        source: |-
+          .cluster = {{ .Values.cluster | quote }}
+          .node = get_env_var!("VECTOR_SELF_NODE_NAME")
+          .application = "node"
+      {{- end }}
+      {{- if .Values.hostMetrics.enabled }}
+      enrich_host_metrics:
+        type: remap
+        inputs: [host_metrics]
+        source: |-
+          .tags.cluster = {{ .Values.cluster | quote }}
+          .tags.node = get_env_var!("VECTOR_SELF_NODE_NAME")
+          .tags.host = get_env_var!("VECTOR_SELF_NODE_NAME")
+      {{- end }}
+      {{- if .Values.podMetrics.enabled }}
+      namespace_pod_metrics:
+        type: filter
+        inputs: [pod_metrics]
+        condition: '.tags.namespace == {{ .Values.targetNamespace | quote }} && exists(.tags.pod)'
+      enrich_pod_metrics:
+        type: remap
+        inputs: [namespace_pod_metrics]
+        source: |-
+          .tags.cluster = {{ .Values.cluster | quote }}
+          .tags.node = get_env_var!("VECTOR_SELF_NODE_NAME")
+      {{- end }}
+    sinks:
+      pod_logs_kafka:
+        type: kafka
+        inputs: [enrich_pod_logs]
+        bootstrap_servers: {{ .Values.kafka.brokers | quote }}
+        topic: {{ .Values.kafka.topics.podLogs | quote }}
+        encoding:
+          codec: json
+        buffer:
+          type: disk
+          max_size: {{ .Values.kafka.bufferBytes | int64 }}
+        {{- include "telemetry-kafka.kafkaSecurity" . | nindent 8 }}
+      {{- if .Values.nodeLogs.enabled }}
+      node_logs_kafka:
+        type: kafka
+        inputs: [enrich_node_logs]
+        bootstrap_servers: {{ .Values.kafka.brokers | quote }}
+        topic: {{ .Values.kafka.topics.nodeLogs | quote }}
+        encoding:
+          codec: json
+        buffer:
+          type: disk
+          max_size: {{ .Values.kafka.bufferBytes | int64 }}
+        {{- include "telemetry-kafka.kafkaSecurity" . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.hostMetrics.enabled .Values.podMetrics.enabled }}
+      metrics_kafka:
+        type: kafka
+        inputs:
+          {{- if .Values.hostMetrics.enabled }}
+          - enrich_host_metrics
+          {{- end }}
+          {{- if .Values.podMetrics.enabled }}
+          - enrich_pod_metrics
+          {{- end }}
+        bootstrap_servers: {{ .Values.kafka.brokers | quote }}
+        topic: {{ .Values.kafka.topics.metrics | quote }}
+        encoding:
+          codec: otlp
+        buffer:
+          type: disk
+          max_size: {{ .Values.kafka.bufferBytes | int64 }}
+        {{- include "telemetry-kafka.kafkaSecurity" . | nindent 8 }}
+      {{- end }}
+{{- define "telemetry-kafka.kafkaSecurity" -}}
+{{- if .Values.kafka.tls.enabled }}
+tls:
+  enabled: true
+  {{- if .Values.kafka.tls.caSecretName }}
+  ca_file: /etc/vector/kafka-ca/ca.crt
+  {{- end }}
+{{- end }}
+{{- if .Values.kafka.sasl.enabled }}
+sasl:
+  enabled: true
+  mechanism: {{ .Values.kafka.sasl.mechanism | quote }}
+  username: {{ .Values.kafka.sasl.username | quote }}
+  password: ${KAFKA_PASSWORD}
+{{- end }}
+{{- end }}

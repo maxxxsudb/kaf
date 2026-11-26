@@ -1,0 +1,83 @@
+services:
+  demo:
+    image: alpine:3.20
+    container_name: log-emitter-demo
+    command: ["sh", "-c", "i=0; while true; do i=$$((i+1)); echo \"demo event=$$i timestamp=$$(date -u +%Y-%m-%dT%H:%M:%SZ)\"; sleep 5; done"]
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.9.1
+    hostname: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    restart: unless-stopped
+
+  collector:
+    image: timberio/vector:0.58.0-alpine
+    user: "0"
+    command: ["--config", "/etc/vector/vector.yaml"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - ./vector.yaml:/etc/vector/vector.yaml:ro
+      - vector-data:/var/lib/vector
+    environment:
+      PROCFS_ROOT: /host/proc
+      SYSFS_ROOT: /host/sys
+    depends_on:
+      - kafka
+      - demo
+    restart: unless-stopped
+
+  consumer:
+    image: grafana/alloy:v1.22.0
+    command: ["run", "/etc/alloy/config.alloy", "--storage.path=/var/lib/alloy"]
+    volumes:
+      - ./consumer.alloy:/etc/alloy/config.alloy:ro
+      - alloy-data:/var/lib/alloy
+    depends_on:
+      - kafka
+      - loki
+    restart: unless-stopped
+
+  mimir:
+    image: grafana/mimir:2.17.1
+    command: ["-config.file=/etc/mimir/demo.yaml"]
+    volumes:
+      - ./mimir.yaml:/etc/mimir/demo.yaml:ro
+      - mimir-data:/mimir
+    ports:
+      - "127.0.0.1:9009:9009"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.7.0
+    command: ["-config.file=/etc/loki/local.yaml"]
+    volumes:
+      - ./loki.yaml:/etc/loki/local.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "127.0.0.1:3100:3100"
+    restart: unless-stopped
+
+volumes:
+  kafka-data:
+  vector-data:
+  alloy-data:
+  loki-data:
+  mimir-data:

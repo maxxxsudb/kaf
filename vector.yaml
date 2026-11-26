@@ -1,0 +1,33 @@
+data_dir: /var/lib/vector
+
+sources:
+  demo_stdout:
+    type: docker_logs
+    include_containers: [log-emitter-demo]
+  node_metrics:
+    type: host_metrics
+    namespace: demo
+    scrape_interval_secs: 15
+    collectors: [cpu, memory, load, cgroups]
+
+sinks:
+  kafka_logs:
+    type: kafka
+    inputs: [demo_stdout]
+    bootstrap_servers: kafka:9092
+    topic: demo-logs
+    encoding:
+      codec: json
+    buffer:
+      type: disk
+      max_size: 268435488
+  kafka_metrics:
+    type: kafka
+    inputs: [node_metrics]
+    bootstrap_servers: kafka:9092
+    topic: demo-metrics-otlp
+    encoding:
+      codec: otlp
+    buffer:
+      type: disk
+      max_size: 268435488

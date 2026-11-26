@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "telemetry-kafka.name" . }}
+  labels:
+    {{- include "telemetry-kafka.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "telemetry-kafka.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "telemetry-kafka.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "telemetry-kafka.name" . }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      containers:
+        - name: vector
+          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              vector --config /etc/vector/vector.yaml &
+              pid=$!
+              trap 'kill -TERM "$pid"; wait "$pid"' TERM INT
+              {{- if .Values.podMetrics.enabled }}
+              (while sleep 3600; do kill -HUP "$pid" || exit 0; done) &
+              {{- end }}
+              wait "$pid"
+          env:
+            - name: VECTOR_SELF_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: VECTOR_SELF_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: PROCFS_ROOT
+              value: /host/proc
+            - name: SYSFS_ROOT
+              value: /host/sys
+            {{- if .Values.kafka.sasl.enabled }}
+            - name: KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafka.sasl.passwordSecretName | quote }}
+                  key: {{ .Values.kafka.sasl.passwordSecretKey | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vector
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/vector
+            - name: pod-logs
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-sys
+              mountPath: /host/sys
+              readOnly: true
+            {{- if .Values.nodeLogs.enabled }}
+            - name: journal-persistent
+              mountPath: /var/log/journal
+              readOnly: true
+            - name: journal-runtime
+              mountPath: /run/log/journal
+              readOnly: true
+            {{- end }}
+            {{- if .Values.kafka.tls.caSecretName }}
+            - name: kafka-ca
+              mountPath: /etc/vector/kafka-ca
+              readOnly: true
+            {{- end }}
+            {{- if .Values.podMetrics.caSecretName }}
+            - name: kubelet-ca
+              mountPath: /etc/vector/kubelet-ca
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "telemetry-kafka.name" . }}
+        - name: data
+          hostPath:
+            path: {{ printf "/var/lib/%s" (include "telemetry-kafka.name" .) | quote }}
+            type: DirectoryOrCreate
+        - name: pod-logs
+          hostPath:
+            path: /var/log/pods
+            type: Directory
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
+        - name: host-sys
+          hostPath:
+            path: /sys
+            type: Directory
+        {{- if .Values.nodeLogs.enabled }}
+        - name: journal-persistent
+          hostPath:
+            path: /var/log/journal
+            type: DirectoryOrCreate
+        - name: journal-runtime
+          hostPath:
+            path: /run/log/journal
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.kafka.tls.caSecretName }}
+        - name: kafka-ca
+          secret:
+            secretName: {{ .Values.kafka.tls.caSecretName | quote }}
+        {{- end }}
+        {{- if .Values.podMetrics.caSecretName }}
+        - name: kubelet-ca
+          secret:
+            secretName: {{ .Values.podMetrics.caSecretName | quote }}
+        {{- end }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: telemetry-kafka
+description: In-cluster Vector collection to Kafka
+type: application
+version: 0.1.0
+appVersion: "0.58.0"

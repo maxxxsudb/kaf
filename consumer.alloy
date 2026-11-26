@@ -1,0 +1,38 @@
+loki.source.kafka "demo" {
+  brokers    = ["kafka:9092"]
+  topics     = ["demo-logs"]
+  group_id   = "demo-loki"
+  labels     = {job = "demo", pipeline = "kafka"}
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+otelcol.receiver.kafka "metrics" {
+  brokers          = ["kafka:9092"]
+  protocol_version = "3.9.0"
+  group_id         = "demo-alloy-metrics"
+
+  metrics {
+    topics   = ["demo-metrics-otlp"]
+    encoding = "otlp_proto"
+  }
+
+  output {
+    metrics = [otelcol.exporter.prometheus.metrics.input]
+  }
+}
+
+otelcol.exporter.prometheus "metrics" {
+  forward_to = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}

@@ -1,0 +1,51 @@
+cluster: ""
+targetNamespace: ""
+applicationAnnotation: app.kubernetes.io/name
+
+image:
+  repository: timberio/vector
+  tag: 0.58.0-debian
+
+nodeSelector: {}
+tolerations: []
+
+kafka:
+  brokers: ""
+  topics:
+    podLogs: ""
+    nodeLogs: ""
+    metrics: ""
+  tls:
+    enabled: false
+    caSecretName: ""
+  sasl:
+    enabled: false
+    mechanism: SCRAM-SHA-512
+    username: ""
+    passwordSecretName: ""
+    passwordSecretKey: password
+  bufferBytes: 268435488
+
+nodeLogs:
+  enabled: true
+  units: [kubelet.service, containerd.service]
+  journalDirectory: /var/log/journal
+
+hostMetrics:
+  enabled: true
+  intervalSeconds: 15
+
+podMetrics:
+  enabled: true
+  intervalSeconds: 30
+  kubeletPort: 10250
+  verifyCertificate: true
+  verifyHostname: true
+  caSecretName: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
