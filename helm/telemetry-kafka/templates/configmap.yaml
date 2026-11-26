@@ -1,4 +1,4 @@
-{{- if or (not .Values.cluster) (not .Values.kafka.brokers) (not .Values.kafka.topics.podLogs) (and .Values.nodeLogs.enabled (not .Values.kafka.topics.nodeLogs)) (and (or .Values.hostMetrics.enabled .Values.podMetrics.enabled) (not .Values.kafka.topics.metrics)) -}}
+{{- if or (not .Values.cluster) (not .Values.kafka.brokers) (not .Values.kafka.topics.podLogs) (and (and .Values.nodeLogs.enabled (not .Values.targetNamespace)) (not .Values.kafka.topics.nodeLogs)) (and (or (and .Values.hostMetrics.enabled (not .Values.targetNamespace)) .Values.podMetrics.enabled) (not .Values.kafka.topics.metrics)) -}}
 {{- fail "Set cluster, kafka.brokers, and enabled kafka.topics in values" -}}
 {{- end -}}
 apiVersion: v1
@@ -20,13 +20,17 @@ data:
       pod_logs:
         type: kubernetes_logs
         self_node_name: ${VECTOR_SELF_NODE_NAME}
-      {{- if .Values.nodeLogs.enabled }}
+        {{- if .Values.targetNamespace }}
+        include_paths_glob_patterns:
+          - {{ printf "/var/log/pods/%s_*/*/*.log" .Values.targetNamespace | quote }}
+        {{- end }}
+      {{- if (and .Values.nodeLogs.enabled (not .Values.targetNamespace)) }}
       node_journal:
         type: journald
         journal_directory: {{ .Values.nodeLogs.journalDirectory | quote }}
         include_units: {{ .Values.nodeLogs.units | toJson }}
       {{- end }}
-      {{- if .Values.hostMetrics.enabled }}
+      {{- if (and .Values.hostMetrics.enabled (not .Values.targetNamespace)) }}
       host_metrics:
         type: host_metrics
         namespace: node
@@ -48,16 +52,22 @@ data:
           verify_hostname: {{ .Values.podMetrics.verifyHostname }}
       {{- end }}
     transforms:
+      {{- if .Values.targetNamespace }}
+      namespace_pod_logs:
+        type: filter
+        inputs: [pod_logs]
+        condition: '.kubernetes.pod_namespace == {{ .Values.targetNamespace | quote }}'
+      {{- end }}
       enrich_pod_logs:
         type: remap
-        inputs: [pod_logs]
+        inputs: [{{ ternary "namespace_pod_logs" "pod_logs" (ne .Values.targetNamespace "") }}]
         source: |-
           .cluster = {{ .Values.cluster | quote }}
           .namespace = .kubernetes.pod_namespace
           .pod = .kubernetes.pod_name
           .node = .kubernetes.pod_node_name
           .application = get(.kubernetes.pod_annotations, [{{ .Values.applicationAnnotation | quote }}]) ?? get(.kubernetes.pod_labels, ["app.kubernetes.io/name"]) ?? .kubernetes.container_name
-      {{- if .Values.nodeLogs.enabled }}
+      {{- if (and .Values.nodeLogs.enabled (not .Values.targetNamespace)) }}
       enrich_node_logs:
         type: remap
         inputs: [node_journal]
@@ -66,7 +76,7 @@ data:
           .node = get_env_var!("VECTOR_SELF_NODE_NAME")
           .application = "node"
       {{- end }}
-      {{- if .Values.hostMetrics.enabled }}
+      {{- if (and .Values.hostMetrics.enabled (not .Values.targetNamespace)) }}
       enrich_host_metrics:
         type: remap
         inputs: [host_metrics]
@@ -76,9 +86,15 @@ data:
           .tags.host = get_env_var!("VECTOR_SELF_NODE_NAME")
       {{- end }}
       {{- if .Values.podMetrics.enabled }}
+      {{- if .Values.targetNamespace }}
+      namespace_pod_metrics:
+        type: filter
+        inputs: [pod_metrics]
+        condition: '.tags.namespace == {{ .Values.targetNamespace | quote }}'
+      {{- end }}
       enrich_pod_metrics:
         type: remap
-        inputs: [pod_metrics]
+        inputs: [{{ ternary "namespace_pod_metrics" "pod_metrics" (ne .Values.targetNamespace "") }}]
         source: |-
           .tags.cluster = {{ .Values.cluster | quote }}
           .tags.node = get_env_var!("VECTOR_SELF_NODE_NAME")
@@ -95,7 +111,7 @@ data:
           type: disk
           max_size: {{ .Values.kafka.bufferBytes | int64 }}
         {{- include "telemetry-kafka.kafkaSecurity" . | nindent 8 }}
-      {{- if .Values.nodeLogs.enabled }}
+      {{- if (and .Values.nodeLogs.enabled (not .Values.targetNamespace)) }}
       node_logs_kafka:
         type: kafka
         inputs: [enrich_node_logs]
@@ -108,11 +124,11 @@ data:
           max_size: {{ .Values.kafka.bufferBytes | int64 }}
         {{- include "telemetry-kafka.kafkaSecurity" . | nindent 8 }}
       {{- end }}
-      {{- if or .Values.hostMetrics.enabled .Values.podMetrics.enabled }}
+      {{- if or (and .Values.hostMetrics.enabled (not .Values.targetNamespace)) .Values.podMetrics.enabled }}
       metrics_kafka:
         type: kafka
         inputs:
-          {{- if .Values.hostMetrics.enabled }}
+          {{- if (and .Values.hostMetrics.enabled (not .Values.targetNamespace)) }}
           - enrich_host_metrics
           {{- end }}
           {{- if .Values.podMetrics.enabled }}

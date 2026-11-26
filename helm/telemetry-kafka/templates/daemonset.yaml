@@ -78,7 +78,7 @@ spec:
             - name: host-sys
               mountPath: /host/sys
               readOnly: true
-            {{- if .Values.nodeLogs.enabled }}
+            {{- if (and .Values.nodeLogs.enabled (not .Values.targetNamespace)) }}
             - name: journal-persistent
               mountPath: /var/log/journal
               readOnly: true
@@ -116,7 +116,7 @@ spec:
           hostPath:
             path: /sys
             type: Directory
-        {{- if .Values.nodeLogs.enabled }}
+        {{- if (and .Values.nodeLogs.enabled (not .Values.targetNamespace)) }}
         - name: journal-persistent
           hostPath:
             path: /var/log/journal

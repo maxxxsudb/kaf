@@ -5,6 +5,7 @@
 Скопируйте `values-example.yaml` и задайте:
 
 - `cluster` — имя кластера в событиях;
+- `targetNamespace` — namespace для логов и метрик подов. Пустое значение собирает данные со всех namespace и нод. При заданном namespace журналы и метрики самих нод не отправляются;
 - `kafka.brokers` — адрес Kafka в формате `host:port` или список `host1:port1,host2:port2`;
 - `kafka.topics.podLogs`, `nodeLogs`, `metrics` — существующие топики для логов подов, журналов нод и метрик;
 - `nodeSelector` — метки нужных нод. По умолчанию `{}`: DaemonSet запускается на всех нодах, допускающих обычные pod. Для tainted-нод настройте `tolerations`.
